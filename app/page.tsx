@@ -191,7 +191,7 @@ export default function Home() {
         </div>
 
         {/* Developer Section */}
-        <div className="mt-16 bg-white rounded-lg border border-gray-200 p-8">
+        {/* <div className="mt-16 bg-white rounded-lg border border-gray-200 p-8">
           <div className="text-center">
             <h2 className="text-2xl font-bold text-gray-900 mb-4">
               For Developers
@@ -216,7 +216,7 @@ export default function Home() {
               </a>
             </div>
           </div>
-        </div>
+        </div> */}
       </div>
     </main>
   )

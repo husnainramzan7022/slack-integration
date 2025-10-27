@@ -107,7 +107,7 @@ export class SlackService extends BaseIntegrationClass {
   /**
    * Send a message to a Slack channel or user
    */
-  async sendMessage(
+ async sendMessage(
     request: SendMessageRequest,
     authContext: AuthContext
   ): Promise<IntegrationResponse<{ messageId: string; timestamp: string } | undefined>> {
@@ -117,98 +117,42 @@ export class SlackService extends BaseIntegrationClass {
         request
       );
 
-      // Send message as the authenticated user instead of as a bot
-      const messagePayload = {
-        ...validatedRequest,
-        as_user: true, // This makes the message appear as sent by the authenticated user
-      };
-
-      // Remove bot-specific parameters when sending as user
-      delete messagePayload.username;
-      delete messagePayload.icon_emoji;
-      delete messagePayload.icon_url;
-
-      const response = await this.makeApiCall<{ 
-        ok: boolean; 
-        ts: string; 
-        channel: string;
-        error?: string;
-      }>('/chat.postMessage', messagePayload);
 
 
+      if (!this.config) {
+        throw new Error('Integration not initialized');
+      }
+
+
+
+      console.log('Sending message with request:', validatedRequest);
+      if (!this.config) {
+        throw new Error('Integration not initialized');
+      }
+
+      // Use Nango's pre-built triggerAction for sending messages
+      // This automatically handles authentication and sends as the connected user
+      const response = await this.nango.triggerAction(
+        'slack',
+        this.config.nangoConnectionId,
+        'send-message',
+        {
+          channel: validatedRequest.channel,
+          text: validatedRequest.text,
+        }
+      ) as any;
 
       console.log('Send message response:', response);
+
+      // Handle the response from Nango's triggerAction
       if (!response.ok) {
-        // If user is not in channel, try to join automatically
-        if (response.error === 'not_in_channel') {
-          console.log('User not in channel, attempting to join...');
-          try {
-            // Try to join the channel
-            console.log('Attempting to join channel:', validatedRequest.channel);
-            const joinResponse = await this.makeApiCall<{
-              ok: boolean;
-              error?: string;
-            }>('/conversations.join', { channel: validatedRequest.channel });
-
-            console.log('Join response:', joinResponse);
-            if (joinResponse.ok) {
-              console.log('Successfully joined channel, retrying message send...');
-              // Retry sending the message after joining
-              const retryResponse = await this.makeApiCall<{ 
-                ok: boolean; 
-                ts: string; 
-                channel: string;
-                error?: string;
-              }>('/chat.postMessage', messagePayload);
-
-              if (retryResponse.ok) {
-                return this.createResponse({
-                  messageId: retryResponse.ts || '',
-                  timestamp: retryResponse.ts || '',
-                });
-              } else {
-                // If retry also fails, handle retry error
-                return this.createResponse(undefined, this.createError(
-                  IntegrationErrorCodes.API_ERROR,
-                  `Failed to send message after joining channel: ${retryResponse.error}`,
-                  { slackError: retryResponse.error }
-                ));
-              }
-            } else {
-              console.log('Failed to join channel:', joinResponse.error);
-              // Provide specific error message based on join failure
-              if (joinResponse.error === 'channel_not_found') {
-                return this.createResponse(undefined, this.createError(
-                  IntegrationErrorCodes.RESOURCE_NOT_FOUND,
-                  `Channel not found or you don't have access to it.`,
-                  { slackError: joinResponse.error, originalError: response.error }
-                ));
-              } else if (joinResponse.error === 'is_archived') {
-                return this.createResponse(undefined, this.createError(
-                  IntegrationErrorCodes.API_ERROR,
-                  `Cannot join archived channel. Please unarchive the channel first.`,
-                  { slackError: joinResponse.error, originalError: response.error }
-                ));
-              } else if (joinResponse.error === 'invite_only') {
-                return this.createResponse(undefined, this.createError(
-                  IntegrationErrorCodes.INSUFFICIENT_PERMISSIONS,
-                  `This is a private channel that requires an invitation. Please ask a channel member to invite you.`,
-                  { slackError: joinResponse.error, originalError: response.error }
-                ));
-              }
-            }
-          } catch (joinError) {
-            console.log('Error trying to join channel:', joinError);
-          }
-        }
-
-        let errorMessage = `Failed to send message: ${response.error}`;
+        let errorMessage = `Failed to send message: ${response.error || 'Unknown error'}`;
         let suggestions = '';
 
         // Provide helpful suggestions based on error type
         switch (response.error) {
           case 'not_in_channel':
-            suggestions = 'Unable to join the channel automatically. Please join the channel manually first.';
+            suggestions = 'You are not a member of this channel. Please join the channel first.';
             break;
           case 'channel_not_found':
             suggestions = 'The specified channel does not exist or you do not have access to it.';
@@ -229,7 +173,9 @@ export class SlackService extends BaseIntegrationClass {
             suggestions = 'Please check the channel ID and ensure you have access to post messages.';
         }
 
-        errorMessage += ` ${suggestions}`;
+        if (suggestions) {
+          errorMessage += ` ${suggestions}`;
+        }
 
         return this.createResponse(undefined, this.createError(
           IntegrationErrorCodes.API_ERROR,
@@ -237,11 +183,13 @@ export class SlackService extends BaseIntegrationClass {
           { 
             slackError: response.error,
             suggestions,
-            errorType: response.error 
+            errorType: response.error,
+            rawResponse: response.raw_json
           }
         ));
       }
 
+      // Success - return the message details
       return this.createResponse({
         messageId: response.ts || '',
         timestamp: response.ts || '',
